@@ -1,0 +1,12 @@
+name: obsidian-utils
+
+services:
+  bg:
+    image: registry.gitlab.com/my6145916/obsidian-utils:1.0.14
+    container_name: obsidian-utils-bg
+    env_file: .env
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    volumes:
+      - /srv/obsidian/notes:/app/notes:ro

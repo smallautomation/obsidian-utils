@@ -1,0 +1,16 @@
+name: obsidian-utils
+
+x-app: &default-app
+  image: registry.gitlab.com/my6145916/obsidian-utils:${VERSION}
+  env_file: .env
+  restart: unless-stopped
+  stdin_open: true
+  tty: true
+  volumes:
+    - /srv/syncthing/data/notes:/app/notes:ro
+    - ./data/logs:/app/logs
+
+services:
+  bg:
+    container_name: obsidian-utils-bg
+    << : *default-app

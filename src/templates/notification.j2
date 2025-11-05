@@ -1,0 +1,9 @@
+🔔 *Напоминание о задаче*
+
+*Задача:* {{ task }}
+*Время:* {{ notification_time }}
+{% if complexity %}*Сложность:* {{ complexity_emoji }} {{ complexity_name }}
+{% endif %}
+{% if duration and duration != "0" %}*Продолжительность:* {{ duration }} минут
+{% endif %}
+*Файл:* `{{ filename }}`

@@ -1,0 +1,15 @@
+📊 *Статистика задач*
+
+*Всего задач:* {{ total_tasks }}
+*Выполнено:* {{ completed_tasks }}
+*В процессе:* {{ pending_tasks }}
+
+{% if upcoming_notifications %}*Ближайшие напоминания:*
+{% for notification in upcoming_notifications %}
+• {{ notification.time }} - {{ notification.task }}
+{% endfor %}
+{% else %}
+*Ближайших напоминаний нет*
+{% endif %}
+
+_Обновлено: {{ current_time }}_
