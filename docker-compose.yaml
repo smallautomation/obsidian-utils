@@ -10,3 +10,44 @@ services:
     tty: true
     volumes:
       - /srv/obsidian/notes:/app/notes:ro
+   networks:
+      - sync-network
+
+  obsidian-sync:
+    build: .
+    container_name: obsidian-tracker-sync
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./logs:/app/logs
+      # Монтируем директорию с Obsidian vault
+      - /path/to/your/obsidian/vault:/app/data/vaults/primary:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - ./config/.env
+    networks:
+      - sync-network
+
+  telegram-bot:
+    build: .
+    container_name: obsidian-telegram-bot
+    command: python src/telegram/bot.py
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - ./config/.env
+    networks:
+      - sync-network
+    depends_on:
+      - obsidian-sync
+
+networks:
+  sync-network:
+    driver: bridge

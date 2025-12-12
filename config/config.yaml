@@ -1,0 +1,42 @@
+obsidian:
+  vaults:
+    primary:
+      path: "/app/data/vaults/primary"
+      patterns:
+        - "**/*.md"
+      date_format: "%Y-%m-%d"
+      task_pattern: '\[(x|\s)\] (TN|EDWH)-(\d+) - .*?\[??::(\d+)\].*??? (\d{4}-\d{2}-\d{2})'
+
+trackers:
+  yandex_tracker:
+    api_url: "https://api.tracker.yandex.net/v2"
+    org_id: "${YANDEX_ORG_ID}"
+    oauth_token: "${YANDEX_OAUTH_TOKEN}"
+  
+  jira:
+    api_url: "${JIRA_URL}"
+    username: "${JIRA_USERNAME}"
+    api_token: "${JIRA_API_TOKEN}"
+
+telegram:
+  bot_token: "${TELEGRAM_BOT_TOKEN}"
+  chat_id: "${TELEGRAM_CHAT_ID}"
+  admin_ids:
+    - "${TELEGRAM_ADMIN_ID}"
+
+sync:
+  auto_sync_interval: 300  # секунды
+  reconciliation_days: 30
+  check_balance:
+    enabled: true
+    projects: ["TN", "EDWH"]
+    thresholds:
+      daily_imbalance: 2  # часов
+      weekly_imbalance: 10 # часов
+    check_times:
+      - "18:00"
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "/app/logs/sync.log"
