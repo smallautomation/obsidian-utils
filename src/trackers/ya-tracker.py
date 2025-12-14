@@ -614,6 +614,118 @@ def _format_pivot_with_discrepancies(df1):
     return result_lines
 
 
+def _print_discrepancies_summary(obsidian_only_tasks, tracker_discrepancies):
+    """Выводит детальную расшифровку всех расхождений после таблицы"""
+
+    total_issues = len(obsidian_only_tasks) + len(tracker_discrepancies)
+
+    if total_issues == 0:
+        click.secho('\n✓ Все данные синхронизированы, расхождений не обнаружено.', fg='bright_green')
+        return
+
+    click.secho(f'\n{"=" * 80}', fg='bright_yellow')
+    click.secho('РАСШИФРОВКА РАСХОЖДЕНИЙ', fg='bright_yellow', bold=True)
+    click.secho(f'Всего найдено расхождений: {total_issues}', fg='bright_yellow')
+    click.secho(f'{"=" * 80}', fg='bright_yellow')
+
+    # 1. Задачи, которые есть только в Obsidian
+    if obsidian_only_tasks:
+        click.secho('\n📝 ЗАДАЧИ, КОТОРЫЕ ЕСТЬ ТОЛЬКО В OBSIDIAN:', fg='bright_cyan')
+        click.secho('(Эти задачи отсутствуют в трекере и требуют создания)', fg='bright_cyan')
+
+        # Группируем по датам
+        by_date = {}
+        for task in obsidian_only_tasks:
+            date = task['date']
+            if date not in by_date:
+                by_date[date] = []
+            by_date[date].append(task)
+
+        # Сортируем по дате
+        for date in sorted(by_date.keys()):
+            tasks = by_date[date]
+            total_hours = sum(t['obsidian_duration'] for t in tasks)
+
+            click.secho(f'\n  📅 Дата {date} ({len(tasks)} задач, всего {total_hours:.1f} ч):', fg='white')
+
+            for task in tasks:
+                status_color = 'green' if task['obsidian_status'] == 'completed' else 'yellow'
+                click.secho(f'    • {task["task_key"]}: {task["obsidian_duration"]} ч '
+                            f'({task["obsidian_info"]})',
+                            fg=status_color)
+
+    # 2. Расхождения в длительности
+    if tracker_discrepancies:
+        click.secho('\n⚠️  РАСХОЖДЕНИЯ В ДЛИТЕЛЬНОСТИ:', fg='bright_red')
+        click.secho('(Часы в трекере и Obsidian не совпадают)', fg='bright_red')
+
+        # Группируем по датам
+        by_date = {}
+        for disc in tracker_discrepancies:
+            date = disc['date']
+            if date not in by_date:
+                by_date[date] = []
+            by_date[date].append(disc)
+
+        # Сортируем по дате
+        for date in sorted(by_date.keys()):
+            discrepancies = by_date[date]
+            total_diff = sum(d['difference'] for d in discrepancies)
+
+            click.secho(f'\n  📅 Дата {date} ({len(discrepancies)} расхождений, общая разница: {total_diff:.1f} ч):',
+                        fg='white')
+
+            for disc in discrepancies:
+                tracker_hours = disc['tracker_duration']
+                obsidian_hours = disc['obsidian_duration']
+                diff = disc['difference']
+
+                # Определяем, где больше часов
+                if obsidian_hours > tracker_hours:
+                    direction = f"→ Obsidian больше на {diff:.1f} ч"
+                    color = 'bright_red'
+                else:
+                    direction = f"→ Tracker больше на {diff:.1f} ч"
+                    color = 'bright_yellow'
+
+                click.secho(f'    • {disc["task_key"]}: ', nl=False)
+                click.secho(f'Tracker={tracker_hours:.1f}ч, ', fg='cyan', nl=False)
+                click.secho(f'Obsidian={obsidian_hours:.1f}ч ', fg='magenta', nl=False)
+                click.secho(f'({direction})', fg=color)
+
+    # 3. Сводная статистика
+    click.secho(f'\n{"=" * 80}', fg='bright_yellow')
+    click.secho('СВОДНАЯ СТАТИСТИКА:', fg='bright_yellow')
+
+    if obsidian_only_tasks:
+        obsidian_total = sum(t['obsidian_duration'] for t in obsidian_only_tasks)
+        click.secho(f'• Задач только в Obsidian: {len(obsidian_only_tasks)} '
+                    f'(всего {obsidian_total:.1f} ч)', fg='bright_cyan')
+
+    if tracker_discrepancies:
+        tracker_total = sum(d['tracker_duration'] for d in tracker_discrepancies)
+        obsidian_total = sum(d['obsidian_duration'] for d in tracker_discrepancies)
+        diff_total = sum(d['difference'] for d in tracker_discrepancies)
+
+        click.secho(f'• Расхождений в длительности: {len(tracker_discrepancies)}', fg='bright_red')
+        click.secho(f'• Сумма часов в трекере: {tracker_total:.1f} ч', fg='cyan')
+        click.secho(f'• Сумма часов в Obsidian: {obsidian_total:.1f} ч', fg='magenta')
+        click.secho(f'• Общая разница: {diff_total:.1f} ч', fg='bright_red')
+
+    click.secho(f'{"=" * 80}', fg='bright_yellow')
+    click.secho('\n💡 СОВЕТЫ:', fg='bright_green')
+
+    if obsidian_only_tasks:
+        click.secho('• Для задач только в Obsidian: необходимо создать соответствующие записи в трекере',
+                    fg='white')
+
+    if tracker_discrepancies:
+        click.secho('• Для расхождений в длительности: сравните данные и обновите либо трекер, либо Obsidian',
+                    fg='white')
+
+    click.secho('• Используйте функцию синхронизации для автоматического выравнивания данных',
+                fg='white')
+
 def iso8601_to_hours(iso_str):
     if not iso_str or not isinstance(iso_str, str):
         return 0.0
@@ -668,8 +780,9 @@ def show_works_by_date_and_user(create_date_from: str, create_date_to: str, curr
     # Парсим задачи из Obsidian
     obsidian_tasks = parse_obsidian_tasks(create_date_from, create_date_to, obsidian_vault_path=obsidian_vault_path)
 
-    # Создаем список для хранения расхождений (задачи есть в Obsidian, но нет в трекере)
-    obsidian_only_tasks = []
+    # Создаем списки для хранения разных типов расхождений
+    obsidian_only_tasks = []  # Есть только в Obsidian
+    tracker_discrepancies = []  # Расхождения в длительности (разные часы)
 
     if df.empty:
         # Если в трекере вообще нет задач, все задачи из Obsidian считаются расхождениями
@@ -679,9 +792,11 @@ def show_works_by_date_and_user(create_date_from: str, create_date_to: str, curr
                 obsidian_only_tasks.append({
                     'date': date,
                     'task_key': task_key,
+                    'tracker_duration': 0.0,
                     'obsidian_duration': task['duration_hours'],
                     'obsidian_status': task['status'],
-                    'obsidian_info': f"{'✅' if task['status'] == 'completed' else '⏳'} {task['status']}"
+                    'obsidian_info': f"{'✅' if task['status'] == 'completed' else '⏳'} {task['status']}",
+                    'type': 'only_in_obsidian'
                 })
 
         click.secho(f'Информация по сотруднику {current_user} c {create_date_from} до {create_date_to} не обнаружена.',
@@ -689,11 +804,7 @@ def show_works_by_date_and_user(create_date_from: str, create_date_to: str, curr
 
         # Выводим расхождения
         if obsidian_only_tasks:
-            click.secho(f'\nРасхождения (есть в Obsidian, но нет в трекере):', fg='bright_yellow')
-            for task in obsidian_only_tasks:
-                click.secho(f"Дата: {task['date']}, Задача: {task['task_key']}, "
-                            f"Длительность: {task['obsidian_duration']} ч, Статус: {task['obsidian_status']}",
-                            fg='bright_red')
+            _print_discrepancies_summary(obsidian_only_tasks, [])
         return
 
     # Добавляем отсутствующие колонки в DataFrame
@@ -705,8 +816,6 @@ def show_works_by_date_and_user(create_date_from: str, create_date_to: str, curr
         df.insert(3, "obsidian_info", "❌ Нет в Obsidian")
     if "obsidian_status" not in df.columns:
         df.insert(3, "obsidian_status", "not_found")
-
-    # Флаг совпадения длительности
     if "duration_match" not in df.columns:
         df.insert(3, "duration_match", True)
 
@@ -741,9 +850,6 @@ def show_works_by_date_and_user(create_date_from: str, create_date_to: str, curr
             df.at[idx, "obsidian_duration"] = 0
             df.at[idx, "obsidian_info"] = "❌ Нет в Obsidian"
             df.at[idx, "obsidian_status"] = "not_found"
-            log_message(
-                f"Нет в Obsidian-е: {row['issue.key']} на дату {start_date}. Не правильная дада в обсидиане",
-                "ERROR")
 
     # Находим задачи, которые есть в Obsidian, но нет в трекере
     for date in obsidian_tasks:
@@ -753,30 +859,35 @@ def show_works_by_date_and_user(create_date_from: str, create_date_to: str, curr
                 obsidian_only_tasks.append({
                     'date': date,
                     'task_key': task_key,
+                    'tracker_duration': 0.0,
                     'obsidian_duration': task['duration_hours'],
                     'obsidian_status': task['status'],
-                    'obsidian_info': f"{'✅' if task['status'] == 'completed' else '⏳'} {task['status']}"
+                    'obsidian_info': f"{'✅' if task['status'] == 'completed' else '⏳'} {task['status']}",
+                    'type': 'only_in_obsidian'
                 })
-                log_message(
-                    f"Задача есть в Obsidian, но отсутствует в трекере: {task_key} на дату {date}, "
-                    f"Длительность: {task['duration_hours']} ч, Статус: {task['status']}",
-                    "ERROR")
 
     # Проверяем совпадение длительностей для задач из трекера
     for idx, row in df.iterrows():
-        duration_diff = abs(iso8601_to_hours(row["duration"]) - row["obsidian_duration"])
+        tracker_duration = iso8601_to_hours(row["duration"])
+        obsidian_duration = row["obsidian_duration"]
+        duration_diff = abs(tracker_duration - obsidian_duration)
+
         # Используем точность сравнения 0.1 часа (6 минут)
         is_match = duration_diff < 0.1
         df.at[idx, "duration_match"] = is_match
 
+        # Если есть расхождение и задача найдена в Obsidian
         if not is_match and row["obsidian_status"] != "not_found":
             start_date = pd.to_datetime(row["start"], utc=True).tz_convert('Europe/Moscow').strftime("%Y-%m-%d")
-            log_message(
-                f"Разница длительности: {row['issue.key']} {start_date} "
-                f"Tracker: {iso8601_to_hours(row['duration'])} ч, "
-                f"Obsidian: {row['obsidian_duration']} ч, "
-                f"Разница: {duration_diff:.2f} ч",
-                "ERROR")
+
+            tracker_discrepancies.append({
+                'date': start_date,
+                'task_key': row["issue.key"],
+                'tracker_duration': tracker_duration,
+                'obsidian_duration': obsidian_duration,
+                'difference': duration_diff,
+                'type': 'duration_mismatch'
+            })
 
     # Подготовка данных для отображения
     df1 = df[["issue.key", "issue.display", "issue.self", "comment", "start", "duration",
@@ -822,6 +933,8 @@ def show_works_by_date_and_user(create_date_from: str, create_date_to: str, curr
     }, inplace=True)
 
     click.secho(f'Информация по сотруднику {current_user} c {create_date_from} до {create_date_to}', fg='bright_green')
+
+    # Выводим таблицу
     result_lines = _format_pivot_with_discrepancies(df1)
     for line in result_lines:
         if 'All' in line:
@@ -829,28 +942,10 @@ def show_works_by_date_and_user(create_date_from: str, create_date_to: str, curr
         else:
             print(line)
 
-    # Выводим задачи, которые есть только в Obsidian
-    if obsidian_only_tasks:
-        click.secho(f'\nРасхождения (есть в Obsidian, но нет в трекере):', fg='bright_yellow')
-        for task in obsidian_only_tasks:
-            click.secho(f"Дата: {task['date']}, Задача: {task['task_key']}, "
-                        f"Длительность: {task['obsidian_duration']} ч, Статус: {task['obsidian_status']}",
-                        fg='bright_red')
+    # Выводим расшифровку расхождений после таблицы
+    if obsidian_only_tasks or tracker_discrepancies:
+        _print_discrepancies_summary(obsidian_only_tasks, tracker_discrepancies)
 
-        # Также можно добавить сводку по дням
-        date_summary = {}
-        for task in obsidian_only_tasks:
-            date = task['date']
-            if date not in date_summary:
-                date_summary[date] = {'count': 0, 'total_duration': 0}
-            date_summary[date]['count'] += 1
-            date_summary[date]['total_duration'] += task['obsidian_duration']
-
-        click.secho(f'\nСводка по расхождениям:', fg='bright_yellow')
-        for date, stats in date_summary.items():
-            click.secho(f"Дата {date}: {stats['count']} задач, "
-                        f"Общая длительность: {stats['total_duration']:.2f} ч",
-                        fg='bright_red')
 
 def show_works_by_task(task_number: int, org_id: int, token: str, project: str):
     """
