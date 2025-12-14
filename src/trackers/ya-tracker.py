@@ -506,6 +506,7 @@ def show_worklogs_by_date(current_user: str, org_id: int, token: str, valid_date
     df1.loc['Сумма часов'] = pd.Series(df1['Длительность'].sum(), index=['Длительность'])
     click.secho(df1, fg='bright_yellow')
 
+
 def _format_pivot_with_discrepancies(df1):
     """
     Создает сводную таблицу с маркерами расхождений, правильным выравниванием и обрезкой текста
@@ -520,17 +521,7 @@ def _format_pivot_with_discrepancies(df1):
     TASK_NAME_WIDTH = 50
     TASK_LINK_WIDTH = 40
     # Ширина для значения (включая пробел справа)
-    VALUE_WIDTH = 12  # "  1.5O " или "  1.5  "
-
-    # Вспомогательная функция для форматирования
-    def format_value(value, has_discrepancy=False):
-        """Форматирует значение с учетом возможного расхождения"""
-        if has_discrepancy:
-            # Форматируем число и добавляем красную O
-            formatted_num = f"{value:>{VALUE_WIDTH - 2}.1f}"
-            return f"{formatted_num}{click.style('O', fg='red')} "
-        else:
-            return f"{value:>{VALUE_WIDTH - 1}.1f} "
+    VALUE_WIDTH = 12
 
     # Вычисляем общую ширину
     total_width = TASK_KEY_WIDTH + TASK_NAME_WIDTH + TASK_LINK_WIDTH + len(dates) * VALUE_WIDTH + 2
@@ -592,34 +583,36 @@ def _format_pivot_with_discrepancies(df1):
                     )
                     has_discrepancy = mask.any()
 
+                # Форматируем значение с учетом выравнивания
+                formatted_value = f"{duration:>{VALUE_WIDTH - 1}.1f} "
+
                 if has_discrepancy:
-                    # Красная O
-                    formatted_num = f"{duration:>{VALUE_WIDTH - 2}.1f}"
-                    colored_o = click.style('O', fg='red')
-                    line_parts.append(f"{formatted_num}{colored_o} ")
+                    # Выделяем всю длительность красным цветом
+                    colored_value = click.style(formatted_value, fg='red')
+                    line_parts.append(colored_value)
                 else:
-                    line_parts.append(f"{duration:>{VALUE_WIDTH - 1}.1f} ")
+                    line_parts.append(formatted_value)
             else:
                 line_parts.append(f"{0.0:>{VALUE_WIDTH - 1}.1f} ")
 
-        # Собираем строку с цветными элементами
+        # Собираем строку
         colored_line = ''.join(line_parts)
         result_lines.append(colored_line)
 
     # Разделитель
     result_lines.append("-" * total_width)
 
-    # Итоговая строка - используем ТУ ЖЕ функцию форматирования (без цвета)
+    # Итоговая строка
     total_line = f"{'All':<{TASK_KEY_WIDTH}} {'':<{TASK_NAME_WIDTH}} {'':<{TASK_LINK_WIDTH}}"
 
     for date in dates:
         date_total = float(df1[df1['Дата списания'] == date]['Длительность'].sum())
-        # Используем обычное форматирование без цвета для итогов
         total_line += f"{date_total:>{VALUE_WIDTH - 1}.1f} "
 
     result_lines.append(total_line)
 
     return result_lines
+
 
 def iso8601_to_hours(iso_str):
     if not iso_str or not isinstance(iso_str, str):
