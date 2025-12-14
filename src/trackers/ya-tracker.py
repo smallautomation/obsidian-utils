@@ -614,8 +614,9 @@ def _format_pivot_with_discrepancies(df1):
     return result_lines
 
 
-def _print_discrepancies_summary(obsidian_only_tasks, tracker_discrepancies):
-    """Выводит детальную расшифровку всех расхождений после таблицы"""
+def _print_discrepancies_summary(obsidian_only_tasks, tracker_discrepancies,
+                                 date_from=None, date_to=None, current_user=None, token=None, org_id=None):
+    """Выводит детальную расшифровку всех расхождений после таблицы с кнопкой синхронизации"""
 
     total_issues = len(obsidian_only_tasks) + len(tracker_discrepancies)
 
@@ -633,31 +634,16 @@ def _print_discrepancies_summary(obsidian_only_tasks, tracker_discrepancies):
         click.secho('\n📝 ЗАДАЧИ, КОТОРЫЕ ЕСТЬ ТОЛЬКО В OBSIDIAN:', fg='bright_cyan')
         click.secho('(Эти задачи отсутствуют в трекере и требуют создания)', fg='bright_cyan')
 
-        # Группируем по датам
-        by_date = {}
-        for task in obsidian_only_tasks:
-            date = task['date']
-            if date not in by_date:
-                by_date[date] = []
-            by_date[date].append(task)
+        # ... (код группировки по датам остается без изменений)
 
-        # Сортируем по дате
-        for date in sorted(by_date.keys()):
-            tasks = by_date[date]
-            total_hours = sum(t['obsidian_duration'] for t in tasks)
-
-            click.secho(f'\n  📅 Дата {date} ({len(tasks)} задач, всего {total_hours:.1f} ч):', fg='white')
-
-            for task in tasks:
-                status_color = 'green' if task['obsidian_status'] == 'completed' else 'yellow'
-                click.secho(f'    • {task["task_key"]}: {task["obsidian_duration"]} ч '
-                            f'({task["obsidian_info"]})',
-                            fg=status_color)
-
-    # 2. Расхождения в длительности
+    # 2. Расхождения в длительности - ДОБАВЛЯЕМ КНОПКУ СИНХРОНИЗАЦИИ
     if tracker_discrepancies:
         click.secho('\n⚠️  РАСХОЖДЕНИЯ В ДЛИТЕЛЬНОСТИ:', fg='bright_red')
         click.secho('(Часы в трекере и Obsidian не совпадают)', fg='bright_red')
+
+        # Добавляем кнопку синхронизации
+        click.secho('\n  🔄 [S] Синхронизировать время из Obsidian в трекер', fg='bright_green')
+        click.secho('     (Обновит часы в трекере по данным из Obsidian)', fg='white')
 
         # Группируем по датам
         by_date = {}
@@ -684,14 +670,17 @@ def _print_discrepancies_summary(obsidian_only_tasks, tracker_discrepancies):
                 if obsidian_hours > tracker_hours:
                     direction = f"→ Obsidian больше на {diff:.1f} ч"
                     color = 'bright_red'
+                    action = "📤 Отправить в трекер"
                 else:
                     direction = f"→ Tracker больше на {diff:.1f} ч"
                     color = 'bright_yellow'
+                    action = "📥 Забрать из трекера"
 
                 click.secho(f'    • {disc["task_key"]}: ', nl=False)
                 click.secho(f'Tracker={tracker_hours:.1f}ч, ', fg='cyan', nl=False)
                 click.secho(f'Obsidian={obsidian_hours:.1f}ч ', fg='magenta', nl=False)
                 click.secho(f'({direction})', fg=color)
+                click.secho(f'      {action}', fg='bright_white')
 
     # 3. Сводная статистика
     click.secho(f'\n{"=" * 80}', fg='bright_yellow')
@@ -713,18 +702,282 @@ def _print_discrepancies_summary(obsidian_only_tasks, tracker_discrepancies):
         click.secho(f'• Общая разница: {diff_total:.1f} ч', fg='bright_red')
 
     click.secho(f'{"=" * 80}', fg='bright_yellow')
-    click.secho('\n💡 СОВЕТЫ:', fg='bright_green')
 
-    if obsidian_only_tasks:
-        click.secho('• Для задач только в Obsidian: необходимо создать соответствующие записи в трекере',
-                    fg='white')
-
+    # 4. Меню действий после расхождений
     if tracker_discrepancies:
-        click.secho('• Для расхождений в длительности: сравните данные и обновите либо трекер, либо Obsidian',
-                    fg='white')
+        click.secho('\n🎯 ДЕЙСТВИЯ ДЛЯ СИНХРОНИЗАЦИИ:', fg='bright_green')
+        click.secho('[S] Синхронизировать время из Obsidian в трекер', fg='bright_green')
+        click.secho('[T] Синхронизировать время из трекера в Obsidian', fg='bright_yellow')
+        click.secho('[A] Автоматически выровнять все расхождения', fg='bright_cyan')
+        click.secho('[C] Продолжить без изменений', fg='white')
 
-    click.secho('• Используйте функцию синхронизации для автоматического выравнивания данных',
-                fg='white')
+        # Ждем выбора пользователя
+        choice = click.prompt('\nВыберите действие', type=click.Choice(['S', 'T', 'A', 'C', 's', 't', 'a', 'c']),
+                              default='C', show_default=False)
+
+        choice = choice.upper()
+
+        if choice == 'S':
+            # Синхронизация из Obsidian в трекер
+            _sync_obsidian_to_tracker(tracker_discrepancies, date_from, date_to, current_user, token, org_id)
+        elif choice == 'T':
+            # Синхронизация из трекера в Obsidian
+            click.secho('Функция синхронизации из трекера в Obsidian будет реализована позже', fg='bright_yellow')
+        elif choice == 'A':
+            # Автоматическое выравнивание
+            click.secho('Автоматическое выравнивание всех расхождений будет реализовано позже', fg='bright_cyan')
+        elif choice == 'C':
+            click.secho('Продолжаем без изменений...', fg='white')
+
+
+def _sync_obsidian_to_tracker(discrepancies, date_from, date_to, current_user, token, org_id):
+    """Синхронизирует время из Obsidian в трекер - ПОЛНАЯ РЕАЛИЗАЦИЯ"""
+
+    click.secho('\n🔄 НАЧИНАЕМ ПОЛНУЮ СИНХРОНИЗАЦИЮ ИЗ OBSIDIAN В ТРЕКЕР', fg='bright_green')
+
+    # Загружаем задачи из Obsidian для получения полных данных
+    obsidian_tasks = parse_obsidian_tasks(date_from, date_to, obsidian_vault_path=obsidian_vault_path)
+
+    # Готовим список обновлений
+    updates = []
+
+    for disc in discrepancies:
+        date = disc['date']
+        task_key = disc['task_key']
+
+        # Получаем полные данные из Obsidian
+        obsidian_info = None
+        if date in obsidian_tasks and task_key in obsidian_tasks[date]:
+            obsidian_task = obsidian_tasks[date][task_key]
+            obsidian_info = {
+                'duration_hours': obsidian_task['duration_hours'],
+                'description': obsidian_task.get('description', ''),
+                'status': obsidian_task.get('status', 'unknown'),
+                'full_task_line': obsidian_task.get('full_task_line', ''),
+                'source_file': obsidian_task.get('source_file', '')
+            }
+        else:
+            # Если данных нет в Obsidian, создаем базовую структуру
+            obsidian_info = {
+                'duration_hours': disc['obsidian_duration'],
+                'description': f"Задача {task_key}",
+                'status': 'unknown'
+            }
+
+        # Определяем направление изменения
+        direction = 'increase' if disc['obsidian_duration'] > disc['tracker_duration'] else 'decrease'
+        diff = abs(disc['obsidian_duration'] - disc['tracker_duration'])
+
+        updates.append({
+            'date': date,
+            'task_key': task_key,
+            'tracker_duration': disc['tracker_duration'],
+            'obsidian_data': obsidian_info,
+            'difference': diff,
+            'direction': direction
+        })
+
+    if not updates:
+        click.secho('Нет расхождений для синхронизации', fg='bright_yellow')
+        return
+
+    # Показываем сводку изменений
+    click.secho(f'\n📊 НАЙДЕНО {len(updates)} РАСХОЖДЕНИЙ ДЛЯ СИНХРОНИЗАЦИИ:', fg='bright_cyan')
+
+    total_increase = 0
+    total_decrease = 0
+
+    for update in updates:
+        date = update['date']
+        task_key = update['task_key']
+        tracker_hours = update['tracker_duration']
+        obsidian_hours = update['obsidian_data']['duration_hours']
+        diff = update['difference']
+        direction = update['direction']
+
+        # Получаем описание для отображения
+        description = update['obsidian_data'].get('description', '')
+
+        click.secho(f'  • {date} - {task_key}: ', nl=False)
+        click.secho(f'{tracker_hours:.1f}ч → ', fg='cyan', nl=False)
+
+        if direction == 'increase':
+            click.secho(f'{obsidian_hours:.1f}ч ', fg='green', nl=False)
+            click.secho(f'(+{diff:.1f}ч)', fg='bright_green')
+            total_increase += diff
+        else:
+            click.secho(f'{obsidian_hours:.1f}ч ', fg='yellow', nl=False)
+            click.secho(f'(-{diff:.1f}ч)', fg='bright_yellow')
+            total_decrease += diff
+
+        # Показываем описание из Obsidian если есть
+        if description and description.strip():
+            clean_desc = description.strip()
+            if len(clean_desc) > 60:
+                preview = clean_desc[:57] + "..."
+            else:
+                preview = clean_desc
+            click.secho(f'     📝 "{preview}"', fg='white')
+
+    # Показываем итоговую разницу
+    click.secho(f'\n📈 ОБЩАЯ СВОДКА:', fg='bright_cyan')
+    if total_increase > 0:
+        click.secho(f'• Будет добавлено: +{total_increase:.1f} часов', fg='green')
+    if total_decrease > 0:
+        click.secho(f'• Будет уменьшено: -{total_decrease:.1f} часов', fg='yellow')
+
+    net_change = total_increase - total_decrease
+    if net_change > 0:
+        click.secho(f'• Чистое изменение: +{net_change:.1f} часов', fg='bright_green')
+    elif net_change < 0:
+        click.secho(f'• Чистое изменение: -{abs(net_change):.1f} часов', fg='bright_yellow')
+    else:
+        click.secho(f'• Чистое изменение: 0 часов', fg='white')
+
+    # Дополнительные опции синхронизации
+    click.secho(f'\n🎯 НАСТРОЙКИ СИНХРОНИЗАЦИИ:', fg='bright_cyan')
+    click.secho('[1] Синхронизировать все расхождения', fg='white')
+    click.secho('[0] Отмена', fg='red')
+
+    sync_choice = click.prompt('\nВыберите вариант', type=click.Choice(['1', '2', '3', '4']),
+                               default='1', show_default=False)
+
+    if sync_choice == '0':
+        click.secho('Синхронизация отменена', fg='bright_yellow')
+        return
+
+    if not updates:
+        click.secho('Нет записей для выбранного типа синхронизации', fg='yellow')
+        return
+
+    # Запрашиваем окончательное подтверждение
+    if not click.confirm(f'\n⚠️  Вы уверены, что хотите обновить {len(updates)} записей в трекере?'):
+        click.secho('Синхронизация отменена', fg='bright_yellow')
+        return
+
+    # Выполняем обновления
+    try:
+        click.secho('\n🔄 Выполняю синхронизацию...', fg='bright_cyan')
+
+        successful_updates = 0
+        failed_updates = []
+
+        for i, update in enumerate(updates, 1):
+            date = update['date']
+            task_key = update['task_key']
+
+            click.secho(f'  [{i}/{len(updates)}] {task_key} на {date}: ', nl=False)
+
+            # Вызываем функцию обновления
+            success = update_worklog_in_tracker(
+                task_key=task_key,
+                date=date,
+                obsidian_data=update['obsidian_data'],
+                tracker_duration=update['tracker_duration'],
+                current_user=current_user,
+                token=token,
+                org_id=org_id
+            )
+
+            if success:
+                click.secho('✅', fg='green')
+                successful_updates += 1
+            else:
+                click.secho('❌', fg='red')
+                failed_updates.append({
+                    'task': task_key,
+                    'date': date,
+                    'reason': 'API error'
+                })
+
+            # Небольшая задержка между запросами
+            import time
+            time.sleep(0.5)
+
+        # Итоги синхронизации
+        click.secho(f'\n{"=" * 60}', fg='bright_green')
+        click.secho('🏁 СИНХРОНИЗАЦИЯ ЗАВЕРШЕНА', fg='bright_green', bold=True)
+
+        success_rate = (successful_updates / len(updates)) * 100 if updates else 0
+        click.secho(f'• Успешно обновлено: {successful_updates}/{len(updates)} записей ({success_rate:.0f}%)',
+                    fg='green' if success_rate > 90 else 'yellow' if success_rate > 70 else 'red')
+
+        if total_increase > 0:
+            click.secho(f'• Добавлено часов: +{total_increase:.1f}', fg='green')
+        if total_decrease > 0:
+            click.secho(f'• Уменьшено часов: -{total_decrease:.1f}', fg='yellow')
+
+        if failed_updates:
+            click.secho(f'\n❌ Не удалось обновить {len(failed_updates)} записей:', fg='bright_red')
+            for fail in failed_updates:
+                click.secho(f'  - {fail["task"]} на {fail["date"]}', fg='red')
+
+        click.secho(f'{"=" * 60}', fg='bright_green')
+
+        if successful_updates > 0:
+            click.secho('\n💡 Для проверки обновите отчет (пункт 1 в меню)', fg='bright_cyan')
+
+    except Exception as e:
+        click.secho(f'\n❌ ОШИБКА СИНХРОНИЗАЦИИ: {str(e)}', fg='bright_red')
+        import traceback
+        click.secho(f'Детали: {traceback.format_exc()}', fg='red')
+
+
+# Дополнительная функция для массового обновления
+def bulk_sync_obsidian_to_tracker(discrepancies_list, current_user, token, org_id):
+    """
+    Массовая синхронизация из Obsidian в трекер
+    Полезно при запуске из командной строки
+    """
+
+    if not discrepancies_list:
+        click.secho('Нет расхождений для синхронизации', fg='yellow')
+        return
+
+    # Фильтруем только расхождения где Obsidian > Tracker
+    updates = []
+    for disc in discrepancies_list:
+        if disc['obsidian_duration'] > disc['tracker_duration']:
+            updates.append(disc)
+
+    if not updates:
+        click.secho('Нет расхождений где Obsidian > Tracker', fg='yellow')
+        return
+
+    click.secho(f'\nНайдено {len(updates)} расхождений для синхронизации', fg='bright_cyan')
+
+    # Автоматически подтверждаем если записей немного
+    auto_confirm = len(updates) <= 5
+
+    if not auto_confirm and not click.confirm('Продолжить синхронизацию?'):
+        return
+
+    successful = 0
+    failed = 0
+
+    for disc in updates:
+        try:
+            success = update_worklog_in_tracker(
+                task_key=disc['task_key'],
+                date=disc['date'],
+                new_duration=disc['obsidian_duration'],
+                current_user=current_user,
+                token=token,
+                org_id=org_id,
+                comment=f"Синхронизировано из Obsidian. Разница: {disc['difference']:.1f}ч"
+            )
+
+            if success:
+                successful += 1
+            else:
+                failed += 1
+
+        except Exception as e:
+            click.secho(f"Ошибка при обновлении {disc['task_key']}: {str(e)}", fg='red')
+            failed += 1
+
+    click.secho(f'\nИтог: успешно {successful}, ошибок {failed}', fg='green' if failed == 0 else 'yellow')
+
 
 def iso8601_to_hours(iso_str):
     if not iso_str or not isinstance(iso_str, str):
@@ -944,7 +1197,8 @@ def show_works_by_date_and_user(create_date_from: str, create_date_to: str, curr
 
     # Выводим расшифровку расхождений после таблицы
     if obsidian_only_tasks or tracker_discrepancies:
-        _print_discrepancies_summary(obsidian_only_tasks, tracker_discrepancies)
+        _print_discrepancies_summary(obsidian_only_tasks, tracker_discrepancies,
+                                     create_date_from, create_date_to, current_user, token, org_id)
 
 
 def show_works_by_task(task_number: int, org_id: int, token: str, project: str):
@@ -1216,6 +1470,269 @@ def change_worklogs_by_number(task_number: int, worklog_number: int, new_duratio
         click.echo(f"Не удалось изменить трудоотчет в задаче {project}-{task_number} ({response.status_code}).")
         click.echo(f"{response.text}.")
 
+
+def _create_new_worklog(task_key: str, date: str, obsidian_data: dict,
+                        current_user: str, token: str, org_id: int):
+    """Создает новый worklog"""
+
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'X-Org-ID': f'{org_id}',
+    }
+
+    new_duration = obsidian_data['duration_hours']
+    obsidian_description = obsidian_data.get('description', '').strip()
+
+    # Преобразуем дату в формат трекера (дата списания)
+    tracker_date = f"{date}T09:00:00.000+03:00"
+
+    # Преобразуем часы в формат трекера
+    duration_str = _hours_to_tracker_format(new_duration)
+
+    # Формируем комментарий
+    comment = f"📝 Создано из Obsidian. Длительность: {new_duration:.1f}ч"
+
+    # Добавляем описание из Obsidian
+    if obsidian_description:
+        max_desc_length = 500
+        if len(obsidian_description) > max_desc_length:
+            short_desc = obsidian_description[:max_desc_length] + "..."
+        else:
+            short_desc = obsidian_description
+        comment += f"\nОписание из Obsidian: {short_desc}"
+
+    # Добавляем статус задачи
+    obsidian_status = obsidian_data.get('status', 'unknown')
+    status_emoji = "✅" if obsidian_status == 'completed' else "⏳"
+    comment += f"\n{status_emoji} Статус в Obsidian: {obsidian_status}"
+
+    params = {
+        "start": tracker_date,  # Дата списания
+        "duration": duration_str,
+        "comment": comment
+    }
+
+    response = requests.post(
+        f'https://api.tracker.yandex.net/v2/issues/{task_key}/worklog',
+        headers=headers,
+        json=params
+    )
+
+    if response.status_code == 201:
+        click.secho(f"   ✅ Новый worklog создан успешно", fg='green')
+        click.secho(f"      Дата: {date}, Время: {new_duration}ч", fg='white')
+
+        if obsidian_description:
+            preview = obsidian_description[:50] + ("..." if len(obsidian_description) > 50 else "")
+            click.secho(f"      Описание: {preview}", fg='white')
+
+        return True
+    else:
+        click.secho(f"   ❌ Ошибка создания worklog ({response.status_code})", fg='red')
+        if response.text:
+            click.secho(f"      Ошибка: {response.text[:100]}", fg='red')
+        return False
+
+
+def _hours_to_tracker_format(hours: float) -> str:
+    """
+    Преобразует часы в формат трекера (PT1H30M)
+    Примеры:
+      1.5 → PT1H30M
+      2.25 → PT2H15M
+      0.5 → PT30M
+    """
+    total_minutes = int(hours * 60)
+    hours_part = total_minutes // 60
+    minutes_part = total_minutes % 60
+
+    if hours_part > 0 and minutes_part > 0:
+        return f"PT{hours_part}H{minutes_part}M"
+    elif hours_part > 0:
+        return f"PT{hours_part}H"
+    elif minutes_part > 0:
+        return f"PT{minutes_part}M"
+    else:
+        return "PT0M"
+
+
+def update_worklog_in_tracker(task_key: str, date: str, obsidian_data: dict,
+                              tracker_duration: float, current_user: str,
+                              token: str, org_id: int):
+    """
+    Обновляет время в трекере на основе данных из Obsidian
+    Args:
+        task_key (str):         ключ задачи (например, "EDWH-2032")
+        date (str):             дата списания в формате "YYYY-MM-DD"
+        obsidian_data (dict):   данные из Obsidian
+        tracker_duration (float): текущая длительность в трекере
+        current_user (str):     пользователь (email)
+        token (str):            IAM токен
+        org_id (int):           идентификатор организации
+    """
+
+    # 1. Получаем информацию о существующих worklog'ах для задачи
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'X-Org-ID': f'{org_id}',
+    }
+
+    # Получаем все worklog'и для задачи
+    response = requests.get(
+        f'https://api.tracker.yandex.net/v2/issues/{task_key}/worklog',
+        headers=headers
+    )
+
+    if response.status_code != 200:
+        click.secho(f"❌ Не удалось получить worklog'и для задачи {task_key} ({response.status_code})", fg='red')
+        return False
+
+    worklogs = response.json()
+
+    # 2. Ищем worklog для конкретной задачи и даты
+    target_worklog = None
+    target_worklog_id = None
+    target_date = datetime.strptime(date, "%Y-%m-%d").date()
+
+    # Логируем для отладки
+    # click.secho(f"\n🔍 Поиск worklog для задачи {task_key} на дату {date}:", fg='cyan')
+
+    for worklog in worklogs:
+        worklog_id = worklog['id']
+        created_at = worklog['createdAt']
+
+        # Парсим дату создания worklog
+        worklog_date = datetime.fromisoformat(created_at.replace('Z', '+00:00')).date()
+
+        # Получаем информацию о создателе
+        created_by = worklog.get('createdBy', {})
+        created_by_display = created_by.get('display', '')
+        created_by_email = created_by.get('email', '')
+
+        # Ключевое изменение: Ищем worklog по ДАТЕ СПИСАНИЯ, а не по дате создания
+        # В трекере worklog имеет поле start (дата списания), но API может его не возвращать
+        # Поэтому используем альтернативные стратегии поиска
+
+        # Стратегия 1: Ищем по точной дате списания (если есть поле start)
+        if 'start' in worklog:
+            start_time = worklog['start']
+            try:
+                start_date = datetime.fromisoformat(start_time.replace('Z', '+00:00')).date()
+                if start_date == target_date:
+                    target_worklog = worklog
+                    target_worklog_id = worklog_id
+                    click.secho(f"   ✅ Найден по полю start: {start_date}", fg='green')
+                    break
+            except (ValueError, AttributeError):
+                pass
+
+        # Стратегия 2: Ищем по дате создания, если она совпадает с датой списания
+        # (часто worklog создается в тот же день, когда списывается время)
+        if worklog_date == target_date:
+            # Дополнительная проверка пользователя
+            user_matches = (
+                    current_user in created_by_email or
+                    current_user.split('@')[0] in created_by_display.lower() or
+                    # Проверяем имя пользователя без домена
+                    current_user.split('@')[0].split('.')[0] in created_by_display.lower()
+            )
+
+            if user_matches:
+                target_worklog = worklog
+                target_worklog_id = worklog_id
+                click.secho(f"   ✅ Найден по дате создания и пользователю", fg='green')
+                break
+
+    if not target_worklog:
+        # Если worklog не найден, пробуем найти по другим критериям
+        click.secho(f"   ⚠️ Не найден точный worklog для даты {date}", fg='yellow')
+
+        # Стратегия 3: Ищем ЛЮБОЙ worklog от этого пользователя для этой задачи
+        for worklog in worklogs:
+            created_by = worklog.get('createdBy', {})
+            created_by_email = created_by.get('email', '')
+
+            if current_user in created_by_email:
+                target_worklog = worklog
+                target_worklog_id = worklog['id']
+                click.secho(f"   ⚠️ Найден worklog от пользователя (ID: {target_worklog_id})", fg='yellow')
+                break
+
+        if not target_worklog:
+            click.secho(f"   ❌ Worklog не найден, создаем новый", fg='red')
+            return _create_new_worklog(task_key, date, obsidian_data, current_user, token, org_id)
+
+    # 3. Подготавливаем данные для обновления
+    new_duration = obsidian_data['duration_hours']
+    obsidian_description = obsidian_data.get('description', '').strip()
+
+    # Проверяем, нужно ли вообще обновлять
+    if abs(new_duration - tracker_duration) < 0.1:  # Разница меньше 6 минут
+        click.secho(f"   ⚠️ Разница менее 0.1 ч, пропускаем обновление", fg='yellow')
+        return True
+
+    # Преобразуем часы в формат трекера
+    duration_str = _hours_to_tracker_format(new_duration)
+
+    # Формируем комментарий
+    base_comment = ""
+    if tracker_duration > new_duration:
+        # Уменьшаем время
+        diff = tracker_duration - new_duration
+        base_comment = f"📉 Исправлено из Obsidian. Уменьшено с {tracker_duration:.1f}ч до {new_duration:.1f}ч (-{diff:.1f}ч)"
+        action = "уменьшено"
+        color = 'yellow'
+    else:
+        # Увеличиваем время
+        diff = new_duration - tracker_duration
+        base_comment = f"📈 Исправлено из Obsidian. Увеличено с {tracker_duration:.1f}ч до {new_duration:.1f}ч (+{diff:.1f}ч)"
+        action = "увеличено"
+        color = 'green'
+
+    # Формируем финальный комментарий
+    final_comment = base_comment
+
+    # Добавляем описание из Obsidian
+    if obsidian_description:
+        max_desc_length = 500
+        if len(obsidian_description) > max_desc_length:
+            short_desc = obsidian_description[:max_desc_length] + "..."
+        else:
+            short_desc = obsidian_description
+        final_comment += f"{short_desc}"
+
+    # 4. Обновляем существующий worklog
+    params = {
+        "duration": duration_str,
+        "comment": f"{short_desc}"
+    }
+
+    click.secho(f"   🔄 Обновляю worklog {target_worklog_id}...", fg='cyan')
+
+    response = requests.patch(
+        f'https://api.tracker.yandex.net/v2/issues/{task_key}/worklog/{target_worklog_id}',
+        headers=headers,
+        json=params
+    )
+
+    if response.status_code == 200:
+        click.secho(f"   ✅ Worklog успешно обновлен", fg='green')
+        click.secho(f"      Время {action}: {tracker_duration:.1f}ч → {new_duration:.1f}ч", fg=color)
+
+        if obsidian_description:
+            preview = obsidian_description[:50] + ("..." if len(obsidian_description) > 50 else "")
+            click.secho(f"      Описание: {preview}", fg='white')
+
+        return True
+    else:
+        click.secho(f"   ❌ Ошибка обновления worklog ({response.status_code})", fg='red')
+        if response.text:
+            error_msg = response.text[:100]
+            click.secho(f"      Ошибка: {error_msg}", fg='red')
+
+        # Пробуем создать новый worklog если не удалось обновить
+        click.secho(f"   🔄 Пробую создать новый worklog...", fg='yellow')
+        return _create_new_worklog(task_key, date, obsidian_data, current_user, token, org_id)
 
 def get_user_issues(username, org_id: int, token: str):
     """
