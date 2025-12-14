@@ -3,4 +3,6 @@
 .idea/
 *.env
 *.json
-/__pycache__/
+*.log
+__pycache__/
+config.toml
