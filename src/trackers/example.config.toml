@@ -1,0 +1,9 @@
+# выпустите персональный токен для доступа на чтение https://gitlab.tn.ru/-/user_settings/personal_access_tokens
+gitlab_user_token = "xxxxxxx"
+gitlab_group_id = 1181          # для получения списка пользователей по группе EDWH - все ли там заведены?
+tracker_project_id = 'EDWH'
+tracker_board_id = 617
+tracker_issue_statuses = ['inReview', 'inProgress', 'readyForTest', 'testing']
+daily_work_reports=['EDWH-165 Дейлик', 'EDWH-165 Недельная синхронизация', 'EDWH-165 Моделирование',
+    'EDWH-181 Отпуск', 'EDWH-181 Болезнь', 'EDWH-181 Отпросился', ]
+obsidian_vault_path =  "/home/aborisov/notes/base/periodic/daily"
