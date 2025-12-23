@@ -476,7 +476,7 @@ def show_worklogs_by_date(current_user: str, org_id: int, token: str, valid_date
     """
     Обработка и отображение трудоотчетов по пользователю за конкретную дату
     Args:
-        valid_date (datetime):           дата для получения трудоотчетов
+        valid_date (datetime):      дата для получения трудоотчетов
         current_user (str):         активный пользователь для получения данных
         org_id (int):               идентификатор организации из трекера
         token (str):                IAM токен
@@ -979,39 +979,72 @@ def bulk_sync_obsidian_to_tracker(discrepancies_list, current_user, token, org_i
     click.secho(f'\nИтог: успешно {successful}, ошибок {failed}', fg='green' if failed == 0 else 'yellow')
 
 
-def iso8601_to_hours(iso_str):
+def iso8601_to_hours(iso_str, work_hours_per_day=8.0):
+    """
+    Конвертирует ISO 8601 duration в часы.
+    Для рабочего времени: 1 день (D) = 8 часов (по умолчанию).
+
+    Args:
+        iso_str: Строка в формате ISO 8601 или число
+        work_hours_per_day: Количество рабочих часов в дне (по умолчанию 8)
+
+    Returns:
+        Количество часов (float)
+    """
     if not iso_str or not isinstance(iso_str, str):
         return 0.0
 
     # Приводим к верхнему регистру для единообразия
     iso_str = iso_str.upper().strip()
 
-    # Проверяем, что строка начинается с PT
-    if not iso_str.startswith('PT'):
-        # Пробуем интерпретировать как число
+    # Пробуем интерпретировать как число, если это не ISO формат
+    if not iso_str.startswith('P'):
         try:
             return float(iso_str)
         except ValueError:
             return 0.0
 
-    # Удаляем префикс PT
-    duration_str = iso_str[2:]
-
-    # Используем регулярное выражение для извлечения компонентов
-    # Обрабатываем часы (H), минуты (M) и секунды (S)
-    pattern = r'(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?'
-    match = re.fullmatch(pattern, duration_str)
-
-    if not match:
+    # Проверяем, что строка начинается с P (Period)
+    if not iso_str.startswith('P'):
         return 0.0
 
-    # Извлекаем компоненты
-    hours = float(match.group(1)) if match.group(1) else 0.0
-    minutes = float(match.group(2)) if match.group(2) else 0.0
-    seconds = float(match.group(3)) if match.group(3) else 0.0
+    # Удаляем префикс P
+    duration_str = iso_str[1:]
 
-    # Конвертируем всё в часы
-    total_hours = hours + (minutes / 60.0) + (seconds / 3600.0)
+    # Разделяем на дату и время части
+    date_part = ''
+    time_part = ''
+
+    if 'T' in duration_str:
+        date_part, time_part = duration_str.split('T', 1)
+    else:
+        # Если нет T, то вся строка это дата (только дни)
+        date_part = duration_str
+
+    total_hours = 0.0
+
+    # Обрабатываем дату (дни) - для рабочего времени
+    if date_part:
+        # Обрабатываем дни (D)
+        days_match = re.search(r'(\d+(?:\.\d+)?)D', date_part)
+        if days_match:
+            days = float(days_match.group(1))
+            total_hours += days * work_hours_per_day
+
+    # Обрабатываем время (часы, минуты, секунды)
+    if time_part:
+        # Используем регулярное выражение для извлечения часов, минут, секунд
+        time_pattern = r'(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?'
+        time_match = re.fullmatch(time_pattern, time_part)
+
+        if time_match:
+            # Извлекаем компоненты времени
+            hours = float(time_match.group(1)) if time_match.group(1) else 0.0
+            minutes = float(time_match.group(2)) if time_match.group(2) else 0.0
+            seconds = float(time_match.group(3)) if time_match.group(3) else 0.0
+
+            # Конвертируем всё в часы
+            total_hours += hours + (minutes / 60.0) + (seconds / 3600.0)
 
     return total_hours
 
@@ -1162,8 +1195,8 @@ def show_works_by_date_and_user(create_date_from: str, create_date_to: str, curr
     df1['weekday'] = df1['start'].dt.dayofweek.map(day_of_week)
 
     # Преобразование длительности из ISO8601 в часы
-    df1["duration"] = df1["duration"].str.replace('P', '', regex=True).replace('T', '', regex=True).apply(parse).map(
-        lambda x: x / 3600)
+
+    df1["duration"] = df1["duration"].apply(iso8601_to_hours)
 
     # Формирование ссылки на задачу
     df1["issue.self"] = df1["issue.self"].str.replace('api.tracker.yandex.net', 'tracker.yandex.ru',
@@ -1534,26 +1567,65 @@ def _create_new_worklog(task_key: str, date: str, obsidian_data: dict,
         return False
 
 
-def _hours_to_tracker_format(hours: float) -> str:
+def _hours_to_tracker_format(hours: float, work_hours_per_day: float = 8.0) -> str:
     """
-    Преобразует часы в формат трекера (PT1H30M)
+    Преобразует часы в формат трекера (P1DT1H30M) с поддержкой дней
+
+    Args:
+        hours: Количество часов
+        work_hours_per_day: Количество рабочих часов в дне (по умолчанию 8)
+
+    Returns:
+        Строка в формате ISO 8601 duration
+
     Примеры:
+      8.0 → P1D
+      8.5 → P1DT30M
+      10.0 → P1DT2H
       1.5 → PT1H30M
-      2.25 → PT2H15M
       0.5 → PT30M
     """
-    total_minutes = int(hours * 60)
-    hours_part = total_minutes // 60
-    minutes_part = total_minutes % 60
-
-    if hours_part > 0 and minutes_part > 0:
-        return f"PT{hours_part}H{minutes_part}M"
-    elif hours_part > 0:
-        return f"PT{hours_part}H"
-    elif minutes_part > 0:
-        return f"PT{minutes_part}M"
-    else:
+    # Обработка нулевого значения
+    if hours <= 0:
         return "PT0M"
+
+    # Рассчитываем дни и оставшиеся часы
+    total_minutes = int(hours * 60)
+    full_days = total_minutes // (work_hours_per_day * 60)
+    remaining_minutes = total_minutes % (work_hours_per_day * 60)
+
+    # Если есть целые дни
+    if full_days > 0:
+        days_str = f"P{full_days}D"
+
+        # Если есть оставшиеся часы/минуты
+        if remaining_minutes > 0:
+            hours_part = remaining_minutes // 60
+            minutes_part = remaining_minutes % 60
+
+            if hours_part > 0 and minutes_part > 0:
+                return f"{days_str}T{hours_part}H{minutes_part}M"
+            elif hours_part > 0:
+                return f"{days_str}T{hours_part}H"
+            elif minutes_part > 0:
+                return f"{days_str}T{minutes_part}M"
+            else:
+                return days_str
+        else:
+            return days_str
+    else:
+        # Только часы и минуты (меньше одного рабочего дня)
+        hours_part = total_minutes // 60
+        minutes_part = total_minutes % 60
+
+        if hours_part > 0 and minutes_part > 0:
+            return f"PT{hours_part}H{minutes_part}M"
+        elif hours_part > 0:
+            return f"PT{hours_part}H"
+        elif minutes_part > 0:
+            return f"PT{minutes_part}M"
+        else:
+            return "PT0M"
 
 
 def update_worklog_in_tracker(task_key: str, date: str, obsidian_data: dict,
@@ -1923,7 +1995,7 @@ def parse_obsidian_tasks(date_from, date_to, obsidian_vault_path: str = None):
                         continue
                 except ValueError:
                     continue
-                # 1 помидор = 30 минут
+                # 1 помидор = 0.5 часа
                 duration_hours = pomodoros * 0.5
 
                 # описание задачи
